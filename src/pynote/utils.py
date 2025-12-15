@@ -121,9 +121,9 @@ def detect_encoding(filepath):
             return 'utf-8'
 
 
-    def full_text_search(root_path, pattern, *, regex=False, ignore_case=True, file_extensions=None, recursive=True):
+    def full_text_search(root_path, pattern, *, regex=False, ignore_case=True, file_extensions=None, recursive=True, context_lines=1):
         """
-        Search for a pattern across files under `root_path`.
+        Search for a pattern across files under `root_path` and return context-aware matches.
 
         Args:
             root_path (str or Path): Directory to search in.
@@ -134,9 +134,11 @@ def detect_encoding(filepath):
                 with these extensions (e.g., ['.py', '.md']). Extensions should
                 include the leading dot.
             recursive (bool): Whether to recurse into subdirectories.
+            context_lines (int): Number of lines of context to include before and after match.
 
         Returns:
-            list of dict: Each match is a dict with keys: `path`, `line_no`, `line`, `match`.
+            list of dict: Each match is a dict with keys: `path`, `line_no`, `line`,
+                          `match`, `pre_context`, `post_context`.
         """
         import re
         from pathlib import Path
@@ -149,7 +151,7 @@ def detect_encoding(filepath):
         matcher = re.compile(pattern, flags) if regex else None
 
         results = []
-        iterator = root.rglob('**/*') if recursive else root.glob('*')
+        iterator = root.rglob('*') if recursive else root.glob('*')
 
         for p in iterator:
             if not p.is_file():
@@ -159,30 +161,40 @@ def detect_encoding(filepath):
                     continue
             try:
                 enc = detect_encoding(p)
+                # Read all lines so we can provide context easily
                 with open(p, 'r', encoding=enc, errors='replace') as f:
-                    for i, raw_line in enumerate(f, start=1):
-                        line = raw_line.rstrip('\n')
-                        if regex:
-                            if matcher.search(line):
-                                results.append({
-                                    'path': str(p),
-                                    'line_no': i,
-                                    'line': line,
-                                    'match': matcher.search(line).group(0),
-                                })
+                    lines = [ln.rstrip('\n') for ln in f]
+
+                for i, line in enumerate(lines, start=1):
+                    if regex:
+                        m = matcher.search(line)
+                        if m:
+                            start = m.start()
+                            matched = m.group(0)
                         else:
-                            hay = line.lower() if ignore_case else line
-                            needle = pattern.lower() if ignore_case else pattern
-                            if needle in hay:
-                                # extract the matched substring (exact occurrence)
-                                start = hay.find(needle)
-                                matched = line[start:start+len(needle)]
-                                results.append({
-                                    'path': str(p),
-                                    'line_no': i,
-                                    'line': line,
-                                    'match': matched,
-                                })
+                            continue
+                    else:
+                        hay = line.lower() if ignore_case else line
+                        needle = pattern.lower() if ignore_case else pattern
+                        idx = hay.find(needle)
+                        if idx == -1:
+                            continue
+                        start = idx
+                        matched = line[start:start + len(pattern)]
+
+                    pre_start = max(0, i - 1 - context_lines)
+                    post_end = min(len(lines), i + context_lines)
+                    pre_context = lines[pre_start:i - 1]
+                    post_context = lines[i:post_end]
+
+                    results.append({
+                        'path': str(p),
+                        'line_no': i,
+                        'line': line,
+                        'match': matched,
+                        'pre_context': pre_context,
+                        'post_context': post_context,
+                    })
             except Exception:
                 # skip files we can't read
                 continue

@@ -1,6 +1,8 @@
 # src/pynote/main.py
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from .ui import SearchDialog
+from . import utils
 
 APP_TITLE = "PyNote"
 
@@ -43,6 +45,10 @@ class PyNoteApp(tk.Tk):
         filemenu.add_separator()
         filemenu.add_command(label='Exit', command=self.quit)
         menu.add_cascade(label='File', menu=filemenu)
+            # Search menu
+            search_menu = tk.Menu(menu, tearoff=0)
+            search_menu.add_command(label='Find in Files...', command=self.open_search)
+            menu.add_cascade(label='Search', menu=search_menu)
         self.config(menu=menu)
 
     def _bind_shortcuts(self):
@@ -108,6 +114,41 @@ class PyNoteApp(tk.Tk):
         line = idx[0]
         col = idx[1]
         self.status.set(f'Ln {line}, Col {col}')
+
+        def open_search(self):
+            SearchDialog(self, self)
+
+        def open_file_at(self, path, line_no=1):
+            """Open a file into the editor and move cursor to `line_no`.
+
+            Highlights the target line for visibility.
+            """
+            try:
+                enc = utils.detect_encoding(path)
+                with open(path, 'r', encoding=enc, errors='replace') as f:
+                    data = f.read()
+                # load into editor
+                if not self._confirm_discard():
+                    return
+                self.text.delete('1.0', tk.END)
+                self.text.insert('1.0', data)
+                self._filepath = path
+                self.title(f"{APP_TITLE} - {path}")
+
+                # move cursor and highlight the line
+                idx = f"{line_no}.0"
+                self.text.mark_set(tk.INSERT, idx)
+                self.text.see(idx)
+                # remove previous tag
+                try:
+                    self.text.tag_delete('search_match')
+                except Exception:
+                    pass
+                self.text.tag_configure('search_match', background='yellow')
+                # apply tag to the whole line
+                self.text.tag_add('search_match', f"{line_no}.0", f"{line_no}.end")
+            except Exception as e:
+                messagebox.showerror('Error', f'Failed to open file: {e}')
 
     def _confirm_discard(self):
         if self.text.edit_modified():
