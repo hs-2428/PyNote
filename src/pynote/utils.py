@@ -120,3 +120,72 @@ def detect_encoding(filepath):
         except Exception:
             return 'utf-8'
 
+
+    def full_text_search(root_path, pattern, *, regex=False, ignore_case=True, file_extensions=None, recursive=True):
+        """
+        Search for a pattern across files under `root_path`.
+
+        Args:
+            root_path (str or Path): Directory to search in.
+            pattern (str): Substring or regex pattern to search for.
+            regex (bool): If True, treat `pattern` as a regular expression.
+            ignore_case (bool): Case-insensitive search when True.
+            file_extensions (iterable[str] | None): If provided, only search files
+                with these extensions (e.g., ['.py', '.md']). Extensions should
+                include the leading dot.
+            recursive (bool): Whether to recurse into subdirectories.
+
+        Returns:
+            list of dict: Each match is a dict with keys: `path`, `line_no`, `line`, `match`.
+        """
+        import re
+        from pathlib import Path
+
+        root = Path(root_path)
+        if not root.exists():
+            raise FileNotFoundError(f"Search root not found: {root}")
+
+        flags = re.IGNORECASE if ignore_case else 0
+        matcher = re.compile(pattern, flags) if regex else None
+
+        results = []
+        iterator = root.rglob('**/*') if recursive else root.glob('*')
+
+        for p in iterator:
+            if not p.is_file():
+                continue
+            if file_extensions is not None:
+                if p.suffix not in file_extensions:
+                    continue
+            try:
+                enc = detect_encoding(p)
+                with open(p, 'r', encoding=enc, errors='replace') as f:
+                    for i, raw_line in enumerate(f, start=1):
+                        line = raw_line.rstrip('\n')
+                        if regex:
+                            if matcher.search(line):
+                                results.append({
+                                    'path': str(p),
+                                    'line_no': i,
+                                    'line': line,
+                                    'match': matcher.search(line).group(0),
+                                })
+                        else:
+                            hay = line.lower() if ignore_case else line
+                            needle = pattern.lower() if ignore_case else pattern
+                            if needle in hay:
+                                # extract the matched substring (exact occurrence)
+                                start = hay.find(needle)
+                                matched = line[start:start+len(needle)]
+                                results.append({
+                                    'path': str(p),
+                                    'line_no': i,
+                                    'line': line,
+                                    'match': matched,
+                                })
+            except Exception:
+                # skip files we can't read
+                continue
+
+        return results
+
